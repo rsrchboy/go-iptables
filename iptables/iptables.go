@@ -24,12 +24,14 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+
+	"github.com/rs/zerolog/log"
 )
 
 // Adds the output of stderr to exec.ExitError
 type Error struct {
 	exec.ExitError
-	cmd        exec.Cmd
+	cmd        *exec.Cmd
 	msg        string
 	exitStatus *int //for overriding
 }
@@ -75,6 +77,8 @@ type IPTables struct {
 	v3                int
 	mode              string // the underlying iptables operating mode, e.g. nf_tables
 	timeout           int    // time to wait for the iptables lock, default waits forever
+	netNSPath         string // path of the network namespace
+	nsenterPath       string // path of the nsenter command
 }
 
 // Stat represents a structured statistic entry.
@@ -105,6 +109,12 @@ func Timeout(timeout int) option {
 	}
 }
 
+func NetworkNamespace(path string) option {
+	return func(ipt *IPTables) {
+		ipt.netNSPath = path
+	}
+}
+
 // New creates a new IPTables configured with the options passed as parameter.
 // For backwards compatibility, by default always uses IPv4 and timeout 0.
 // i.e. you can create an IPv6 IPTables using a timeout of 5 seconds passing
@@ -119,6 +129,15 @@ func New(opts ...option) (*IPTables, error) {
 
 	for _, opt := range opts {
 		opt(ipt)
+	}
+
+	// find nsenter, iff necessary
+	if ipt.nsenterPath == "" && ipt.netNSPath != "" {
+		path, err := exec.LookPath("nsenter")
+		if err != nil {
+			return nil, err
+		}
+		ipt.nsenterPath = path
 	}
 
 	path, err := exec.LookPath(getIptablesCommand(ipt.proto))
@@ -494,7 +513,6 @@ func (ipt *IPTables) run(args ...string) error {
 // runWithOutput runs an iptables command with the given arguments,
 // writing any stdout output to the given writer
 func (ipt *IPTables) runWithOutput(args []string, stdout io.Writer) error {
-	args = append([]string{ipt.path}, args...)
 	if ipt.hasWait {
 		args = append(args, "--wait")
 		if ipt.timeout != 0 && ipt.waitSupportSecond {
@@ -514,12 +532,9 @@ func (ipt *IPTables) runWithOutput(args []string, stdout io.Writer) error {
 	}
 
 	var stderr bytes.Buffer
-	cmd := exec.Cmd{
-		Path:   ipt.path,
-		Args:   args,
-		Stdout: stdout,
-		Stderr: &stderr,
-	}
+	cmd := ipt.runCmd(args)
+	cmd.Stdout = stdout
+	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
 		switch e := err.(type) {
@@ -531,6 +546,20 @@ func (ipt *IPTables) runWithOutput(args []string, stdout io.Writer) error {
 	}
 
 	return nil
+}
+
+func (ipt *IPTables) runCmd(args []string) *exec.Cmd {
+	if ipt.netNSPath != "" {
+		// exec.Command()
+		fullArgs := append([]string{
+			fmt.Sprintf("--net=%s", ipt.netNSPath),
+			"--",
+			ipt.path,
+		}, args...)
+		log.Debug().Msgf("Running nsenter command: %v %v", ipt.nsenterPath, fullArgs)
+		return exec.Command(ipt.nsenterPath, fullArgs...)
+	}
+	return exec.Command(ipt.path, args...)
 }
 
 // getIptablesCommand returns the correct command for the given protocol, either "iptables" or "ip6tables".
