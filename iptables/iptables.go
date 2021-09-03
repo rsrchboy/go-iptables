@@ -25,8 +25,15 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
+
+var Logger zerolog.Logger
+
+func init() {
+	Logger = log.Logger
+}
 
 // Adds the output of stderr to exec.ExitError
 type Error struct {
@@ -556,7 +563,7 @@ func (ipt *IPTables) runCmd(args []string) *exec.Cmd {
 			"--",
 			ipt.path,
 		}, args...)
-		log.Debug().Msgf("Running nsenter command: %v %v", ipt.nsenterPath, fullArgs)
+		Logger.Debug().Msgf("Running nsenter command: %v %v", ipt.nsenterPath, fullArgs)
 		return exec.Command(ipt.nsenterPath, fullArgs...)
 	}
 	return exec.Command(ipt.path, args...)
