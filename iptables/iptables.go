@@ -563,7 +563,7 @@ func (ipt *IPTables) runCmd(args []string) *exec.Cmd {
 			"--",
 			ipt.path,
 		}, args...)
-		Logger.Debug().Msgf("Running nsenter command: %v %v", ipt.nsenterPath, fullArgs)
+		Logger.Trace().Msgf("Running nsenter command: %v %v", ipt.nsenterPath, fullArgs)
 		return exec.Command(ipt.nsenterPath, fullArgs...)
 	}
 	return exec.Command(ipt.path, args...)
